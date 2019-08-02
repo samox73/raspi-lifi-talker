@@ -1,0 +1,137 @@
+import sys
+import time
+import threading
+import re
+import ast
+import RPi.GPIO as GPIO
+import numpy as np
+from zlib import crc32
+from ADCDACPi import *
+from remotemanager import serman
+from remotemanager.reptim import *
+from remotemanager.clihelper import *
+from remotemanager.pachel import *
+
+"""
+arguments of this script
+python3 pi_sender.py {baud_rate} {led_power} {message}
+[1] = baud rate
+[2] = led power in terms of PTX1/2/3/4R, e.g. 1248 for full power or 0001 for minimal power
+[3] = string to transmit
+"""
+
+baud_rate_valid = False
+led_power_valid = False
+msg = ""
+
+
+# ~~~~~~~~~~~~~~~~~ setting up all variables and connecting to the serial port ~~~~~~~~~~~~~~~~~~~
+if len(sys.argv) == 4:
+    msg = str(sys.argv[3])
+elif len(sys.argv) == 3:
+    msg = "Hello World!"
+if len(sys.argv) >= 3:
+    baud_rate = ast.literal_eval(str(sys.argv[1]))
+    led_power = ast.literal_eval(str(sys.argv[2]))
+    # convert to list if not already a list
+    if not hasattr(baud_rate, "__len__"):
+        baud_rate = [baud_rate]
+    if not hasattr(led_power, "__len__"):
+        led_power = [led_power]
+
+    baud_rate_valid, led_power_valid = assert_settings(baud_rate, led_power)
+    if baud_rate_valid:
+        baud_rate = list(map(int, baud_rate))
+    else:
+        raise ValueError("Input baudrate(s) not valid!")
+    if led_power_valid:
+        led_power = list(map(int, led_power))
+    else:
+        raise ValueError("Input led power(s) not valid!")
+
+while not baud_rate_valid:
+    baud_rate, baud_rate_valid = get_baud_rate()
+while not led_power_valid:
+    led_power, led_power_valid = get_led_power()
+
+if msg is None or msg == "":
+    filename = input("File to transmit (empty: 'test001.h5'): ")
+
+if filename is None or msg == "":
+    filename = "test001.h5"
+
+print(border_count * "=" + "\nBaudrate(s) set to\t%s" % baud_rate)
+print("LED power(s) set to\t%s" % led_power)
+print("Transmitting file:\t%s\n" % filename + border_count * "=")
+
+# set up GPIO pins of raspi
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.OUT)
+GPIO.setup(23, GPIO.OUT)
+GPIO.setup(25, GPIO.OUT)
+GPIO.setup(27, GPIO.OUT)
+GPIO.setup(22, GPIO.OUT)
+GPIO.output(17, 1)
+
+print("Everything set up! Ready for signal transmission!")
+
+if len(sys.argv) == 1:
+    input("Hit enter to start")
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+def send_msg_countdown(*args):
+    count = args[0]
+    thread_done = args[1]
+    if count <= 0:
+        rt.stop()
+        args[1].set()
+    serial_manager.send_msg(msg)
+    count -= 1
+    return [count, thread_done]
+
+
+# iterate over all baudrates and led powers
+for br in baud_rate:
+    for lp in led_power:
+        print("Establishing connection...")
+        serial_manager = serman.SerialManager()
+        serial_manager.set_port("/dev/serial0")
+        serial_manager.establish_connection(_baudrate=br, _timeout=0.05)
+        print("Established serial connection at port %s" % serial_manager.get_port())
+        set_led_power(lp)
+        print("Sending with baudrate %s and led power %s" % (br, lp))
+        # =====================================================================
+        with open(filename, "rb") as file_tx:
+            eof_reached = False
+            while not eof_reached:
+                event_success = threading.Event()
+                # first 4 bytes contain the checksum, the rest is data
+                pkt = file_tx.read(1500)
+                if len(pkt) < 1500:
+                    eof_reached = True
+                pkt = get_packet_of_msg(bytearray(pkt))
+                send_success = False
+                number_of_tries = 0
+                while not send_success and number_of_tries < 500:
+                    serial_manager.send_msg(pkt + bytearray(b'\n'))
+                    timer = Timer()
+                    while timer.get_value() < 0.01:
+                        response, eol_detected = serial_manager.read_line(_timeout=0.01)
+                        if response == b"0x70":
+                            send_success = True
+                            break
+                    number_of_tries += 1
+                    print(number_of_tries)
+                if not send_success:
+                    raise TimeoutError("Packet could not be transmitted after 1000 tries.")
+
+        # =====================================================================
+        thread_done.wait()
+        time.sleep(0.5)
+        serial_manager.close_connection()
+        print(40 * "=")
+
+print("Measurements done!")
+GPIO.output(17, 0)
