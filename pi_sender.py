@@ -109,19 +109,18 @@ for br in baud_rate:
             while not eof_reached:
                 # first 4 bytes contain the checksum, the rest is data
 
-                msg_str = "Hello World!"
-                pkt = bytearray(msg_str.encode("ASCII"))
-                # pkt = bytearray(file_tx.read(50))
+                # pkt = bytearray("Hello World!".encode("ASCII"))
+                pkt = bytearray(file_tx.read(100))
+                # print(pkt)
 
                 # if len(pkt) < 50:
                 #     eof_reached = True
-                pkt = get_packet_of_msg(pkt, 20)
-                print(pkt)
+                pkt = get_packet_of_msg(pkt, 100)
                 send_success = False
                 number_of_tries = 0
                 while not send_success and number_of_tries < 1000:
-                    # print("SENDING MESSAGE: %s" % (pkt + bytearray(b'\n')))
-                    serial_manager.send_msg(pkt + bytearray(b'\n'))
+                    # print("SENDING MESSAGE: %s" % pkt)
+                    serial_manager.send_msg(pkt + bytearray(b'\r\0\n'))
                     timer = Timer()
                     while timer.get_value() < 0.02:
                         response, eol_detected = serial_manager.read_line(_timeout=0.005)
@@ -135,9 +134,10 @@ for br in baud_rate:
                         tx_fail += 1
                     print("Failed:\t\t%i" % tx_fail)
                     print("Success:\t%i" % tx_success)
+                    print(len(pkt))
                 if not send_success:
                     raise TimeoutError("Packet could not be transmitted after 1000 tries.")
-                time.sleep(0.5)
+                # time.sleep(0.5)
 
         # =====================================================================
         thread_done.wait()

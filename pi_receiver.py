@@ -12,9 +12,14 @@ from ADCDACPi import ADCDACPi
 from threading import Timer
 import RPi.GPIO as GPIO
 
+# set up GPIO pins of raspi
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(17, GPIO.OUT)
+GPIO.setup(23, GPIO.OUT)
+GPIO.setup(25, GPIO.OUT)
+GPIO.setup(27, GPIO.OUT)
+GPIO.setup(22, GPIO.OUT)
 GPIO.output(17, 1)
 
 adcdac = ADCDACPi(1)
@@ -89,23 +94,31 @@ for i, br in enumerate(baud_rate):
         serial_manager = serman.SerialManager()
         serial_manager.set_port("/dev/serial0")
         serial_manager.establish_connection(_baudrate=br, _timeout=0.03)
+        set_led_power(lp)
         # ====================================================================
-        while True:
-            rec_msg, eof_reached = serial_manager.read_line(_timeout=0.05)
-            print(rec_msg.decode("ASCII", errors="replace"))
-            # rec_msg = bytearray("hello there".encode("ASCII"))
-            # rec_msg = struct.pack(">I", crc32(rec_msg)) + rec_msg
+        count = 0
+        eof_reached = False
+        success = 0
+        while not eof_reached:
+            count += 1
+            print("count: %i" % count)
+            rec_msg, eof = serial_manager.read_line(_timeout=10.0, _crc_length=4)
+            # print("msg: %s" % rec_msg)
             if len(rec_msg) > 4:
                 crc32_int_sent = struct.unpack(">I", rec_msg[:4])[0]
                 crc32_int_calc = crc32(rec_msg[4:])
-                print(40 * "=" + "\ncomparing %i and %i" % (crc32_int_sent, crc32_int_calc))
+                print("\n" + 80 * "=" + "\n")
+                print("comparing %i and %i" % (crc32_int_sent, crc32_int_calc))
                 if crc32_int_sent == crc32_int_calc:
                     print("SUUUUUCCCCCEEEEEEEEEEESS")
+                    serial_manager.send_msg(b"0x70\n")
+                else:
+                    print("NOOOOOOO SUCCESSSS")
 
         # ===================================================================
         print("Waiting to close connection...")
         serial_manager.close_connection()
-        print(40 * "=")
+        print("\n" + 80 * "=" + "\n")
 
 print("Measurements done!")
 np.savetxt("~/project/test.csv", accuracy_map, delimiter=",")

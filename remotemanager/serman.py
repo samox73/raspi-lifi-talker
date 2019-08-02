@@ -83,24 +83,26 @@ class SerialManager:
             print('cannot open serial port')
         return
 
-    def read_line(self, _eol_character=b'\n', _timeout=0.05):
+    def read_line(self, _eol_character=b'\r\0\n', _timeout=0.05, _crc_length=4):
         buffer = b""
-        # print("~~~~~~~~~~~~~~~~~~~~~~\n>> Timeout: %f" % _timeout)
+        eol_buffer = bytearray("000".encode("ASCII"))
         timer = time.time()  # start time of read_line
         stopwatch = time.time() - timer  # time consumption of this method
         time_a = time.time()
+        byte_count = 0
         while stopwatch < _timeout:
             delta_t = time.time() - time_a  # delta t after updating the "Elapsed time"
-            if delta_t > 0.5:
-                # print(">> Elapsed time: %f" % (time.time() - timer))
+            if delta_t > _timeout:
                 time_a = time.time()
             one_byte = self.serial_con.read(1)
-            if one_byte == _eol_character:
-                # print(">> DETECTED EOL-CHAR!!!!")
-                return bytearray(buffer), True  # .decode('ASCII', errors="replace")
+            if not one_byte == b'':
+                byte_count += 1
+                eol_buffer.pop(0)
+                eol_buffer += one_byte
+            # print("byte: %s\nbyte count: %i" % (one_byte, byte_count))
+            if eol_buffer == bytearray(_eol_character) and byte_count > _crc_length:
+                return bytearray(buffer[:-2]), True
             else:
-                # buffer += str(one_byte, "ASCII", errors='replace')
-                buffer += one_byte  # .decode("ASCII", errors="replace")
+                buffer += one_byte
             stopwatch = time.time() - timer
-
-        return bytearray(buffer), False  # ">> TIMEOUT! msg: %s\n~~~~~~~~~~~~~~~~~~~~\n" % buffer
+        return bytearray(buffer), False
