@@ -91,11 +91,15 @@ for i, br in enumerate(baud_rate):
         serial_manager.establish_connection(_baudrate=br, _timeout=0.03)
         # ====================================================================
         while True:
-            rec_msg, eof_reached = serial_manager.read_line(_timeout=0.5)
+            rec_msg, eof_reached = serial_manager.read_line(_timeout=0.05)
             print(rec_msg.decode("ASCII", errors="replace"))
+            # rec_msg = bytearray("hello there".encode("ASCII"))
+            # rec_msg = struct.pack(">I", crc32(rec_msg)) + rec_msg
             if len(rec_msg) > 4:
-                crc32_int = struct.unpack(">I", bytes(rec_msg[:4]))
-                if crc32_int == crc32(rec_msg[4:]):
+                crc32_int_sent = struct.unpack(">I", rec_msg[:4])[0]
+                crc32_int_calc = crc32(rec_msg[4:])
+                print(40 * "=" + "\ncomparing %i and %i" % (crc32_int_sent, crc32_int_calc))
+                if crc32_int_sent == crc32_int_calc:
                     print("SUUUUUCCCCCEEEEEEEEEEESS")
 
         # ===================================================================

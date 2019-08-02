@@ -91,7 +91,8 @@ def send_msg_countdown(*args):
     count -= 1
     return [count, thread_done]
 
-
+tx_fail = 0
+tx_success = 0
 # iterate over all baudrates and led powers
 for br in baud_rate:
     for lp in led_power:
@@ -106,26 +107,37 @@ for br in baud_rate:
         with open(filename, "rb") as file_tx:
             eof_reached = False
             while not eof_reached:
-                event_success = threading.Event()
                 # first 4 bytes contain the checksum, the rest is data
-                pkt = file_tx.read(1500)
-                if len(pkt) < 1500:
-                    eof_reached = True
-                pkt = get_packet_of_msg(bytearray(pkt))
+
+                msg_str = "Hello World!"
+                pkt = bytearray(msg_str.encode("ASCII"))
+                # pkt = bytearray(file_tx.read(50))
+
+                # if len(pkt) < 50:
+                #     eof_reached = True
+                pkt = get_packet_of_msg(pkt, 20)
+                print(pkt)
                 send_success = False
                 number_of_tries = 0
-                while not send_success and number_of_tries < 500:
+                while not send_success and number_of_tries < 1000:
+                    # print("SENDING MESSAGE: %s" % (pkt + bytearray(b'\n')))
                     serial_manager.send_msg(pkt + bytearray(b'\n'))
                     timer = Timer()
-                    while timer.get_value() < 0.01:
-                        response, eol_detected = serial_manager.read_line(_timeout=0.01)
+                    while timer.get_value() < 0.02:
+                        response, eol_detected = serial_manager.read_line(_timeout=0.005)
                         if response == b"0x70":
+                            print("success")
                             send_success = True
+                            tx_success += 1
                             break
                     number_of_tries += 1
-                    print(number_of_tries)
+                    if not send_success:
+                        tx_fail += 1
+                    print("Failed:\t\t%i" % tx_fail)
+                    print("Success:\t%i" % tx_success)
                 if not send_success:
                     raise TimeoutError("Packet could not be transmitted after 1000 tries.")
+                time.sleep(0.5)
 
         # =====================================================================
         thread_done.wait()
