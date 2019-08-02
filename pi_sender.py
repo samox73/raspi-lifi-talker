@@ -27,9 +27,9 @@ msg = ""
 
 # ~~~~~~~~~~~~~~~~~ setting up all variables and connecting to the serial port ~~~~~~~~~~~~~~~~~~~
 if len(sys.argv) == 4:
-    msg = str(sys.argv[3])
+    filename = str(sys.argv[3])
 elif len(sys.argv) == 3:
-    msg = "Hello World!"
+    filename = "test001.h5"
 if len(sys.argv) >= 3:
     baud_rate = ast.literal_eval(str(sys.argv[1]))
     led_power = ast.literal_eval(str(sys.argv[2]))
@@ -38,7 +38,7 @@ if len(sys.argv) >= 3:
         baud_rate = [baud_rate]
     if not hasattr(led_power, "__len__"):
         led_power = [led_power]
-
+    # validate values
     baud_rate_valid, led_power_valid = assert_settings(baud_rate, led_power)
     if baud_rate_valid:
         baud_rate = list(map(int, baud_rate))
@@ -48,11 +48,11 @@ if len(sys.argv) >= 3:
         led_power = list(map(int, led_power))
     else:
         raise ValueError("Input led power(s) not valid!")
-
-while not baud_rate_valid:
-    baud_rate, baud_rate_valid = get_baud_rate()
-while not led_power_valid:
-    led_power, led_power_valid = get_led_power()
+else:
+    while not baud_rate_valid:
+        baud_rate, baud_rate_valid = get_baud_rate()
+    while not led_power_valid:
+        led_power, led_power_valid = get_led_power()
 
 if msg is None or msg == "":
     filename = input("File to transmit (empty: 'test001.h5'): ")
