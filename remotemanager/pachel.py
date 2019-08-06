@@ -2,6 +2,7 @@ import sys
 import time
 from zlib import crc32
 from functools import partial
+import numpy as np
 import struct
 
 
@@ -23,15 +24,22 @@ class Timer:
         self.duration = 0
         return
 
+    def reset(self):
+        self.start_time = time.time()
+
     def get_value(self):
         self.duration = time.time() - self.start_time
+        self.start_time = time.time()
         return self.duration
 
 
-class PackageManager:
-    def send_packet(serial_manager, event_received, packet, length=1500):
-        packet = get_packet_of_msg(packet, length=length)
-        serial_manager.send_msg(packet)
-        received = False
-        while not received:
-            serial_manager.read_line()
+class AvgTimer(Timer):
+    def __init__(self):
+        super().__init__()
+        self.time_array = np.array([])
+
+    def add_time(self):
+        self.time_array = np.append(self.time_array, self.get_value())
+
+    def get_avg(self):
+        return np.average(self.time_array)
