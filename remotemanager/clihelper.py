@@ -1,11 +1,19 @@
 import ast
+import getopt
 import re
 import numpy as np
 import RPi.GPIO as GPIO
 
 baud_rates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
-border_count = 40  # length of border
+border_count = 80  # length of border
 
+# default values
+br_df = [460800]
+lp_df = [1]
+md_df = "file"
+dt_df = "test001.h5"
+ps_df = 1500
+cr_df = 0.4
 
 def get_baud_rate():
     print("Available baudrates:")
@@ -111,3 +119,78 @@ def assert_valid_integer(numbers):
             # raise ValueError("Number %s at %s is not a valid integer!" % (item, index))
             return False
     return True
+
+def get_cli_args(argv):
+
+    use_defaults = False
+    baud_rate = None
+    led_power = None
+    mode = None
+    data = None
+    packet_size = None
+    cvref = None
+    manual_input = False
+
+    try:
+        opts, args = getopt.getopt(argv, "hr:p:m:i:s:v:d")
+    except getopt.GetoptError:
+        print("Wrong use of arguments, see 'pi_sender.py -h' for details")
+        sys.exit()
+    for opt, arg in opts:
+        if opt == "-h":
+            print(helpstring)
+            sys.exit()
+        elif opt in ["-r"]:  # BAUD RATE
+            baud_rate = ast.literal_eval(str(arg))
+        elif opt in ["-p"]:  # LED POWER
+            led_power = ast.literal_eval(str(arg))
+        elif opt in ["-m"]:  # MODE
+            if arg == "custom":
+                mode = "custom"
+            elif arg == "file":
+                mode = "file"
+            else:
+                print("Wrong usage of flag '-m', should either be 'custom' or 'file'")
+                sys.exit()
+        elif opt in ["-i"]:  # FILENAME/STRING
+            data = str(arg)
+        elif opt in ["-s"]:  # PACKET SIZE
+            try:
+                packet_size = int(arg)
+            except ValueError:
+                print("Argument of flag '-s' must be a valid integer")
+        elif opt in ["-v"]:  # CVREF
+            try:
+                cvref = float(arg)
+            except ValueError:
+                print("Argument of flag '-v' must be a valid float between 0 and 1")
+            if cvref < 0 or cvref > 1:
+                print("CVRef must be in [0,1]!")
+                sys.exit()
+        elif opt in ["-d"]:  # DEFAULT VALUES
+            use_defaults = True
+        elif opt in ["-x"]:  # TO BE DONE
+            manual_input = True
+        else:
+            print("Unknown flag %s, use -h for help." % opt)
+            sys.exit()
+    return use_defaults, baud_rate, led_power, mode, data, packet_size, cvref, manual_input
+
+def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref):
+    # if variables dont have any value assign the default one
+    if baud_rate == "" or baud_rate is None:
+        baud_rate = br_df
+    if led_power == "" or led_power is None:
+        led_power = lp_df
+    if mode == "" or mode is None:
+        mode = md_df
+    if data == "" or data is None:
+        data = dt_df
+    if packet_size is None:
+        packet_size = ps_df
+    if cvref is None:
+        cvref = cr_df
+    return baud_rate, led_power, mode, data, packet_size, cvref
+
+def force_defaults():
+    return br_df, lp_df, md_df, dt_df, ps_df, cr_df

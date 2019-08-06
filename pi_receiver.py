@@ -8,9 +8,20 @@ from zlib import crc32
 from remotemanager import serman
 from remotemanager.reptim import *
 from remotemanager.clihelper import *
+from remotemanager.pachel import *
 from ADCDACPi import ADCDACPi
 from threading import Timer
 import RPi.GPIO as GPIO
+
+"""
+arguments of this script
+python3 pi_sender.py {baud_rate} {led_power} {message}
+[1] = baud rate (default: 460800)
+[2] = led power in range 0-15 (default: 1)
+[3] = string, value: either "custom" or "file" (default: "file")
+[4] = string of message to transmit or filename (default: "test001.h5")
+[5] = packet size in bytes (default: 1500) only for transmitting files
+"""
 
 # set up GPIO pins of raspi
 GPIO.setwarnings(False)
@@ -24,103 +35,87 @@ GPIO.output(17, 1)
 
 adcdac = ADCDACPi(1)
 adcdac.set_adc_refvoltage(3.3)
-adcdac.set_dac_voltage(1, 0.4)
+adcdac.set_dac_voltage(1, 0.35)
 
-accuracy = np.array([])
-baud_rate_valid = False
-led_power_valid = False
-msg = ""
+helpstring = "Usage:"
 
-# ~~~~~~~~~~~~~~~~~~~~ setting up all variables ~~~~~~~~~~~~~~~~~~~~~~~~~
-if len(sys.argv) == 4:
-    msg = str(sys.argv[3])
-elif len(sys.argv) == 3:
-    msg = "Hello World!"
-if len(sys.argv) >= 3:
-    baud_rate = ast.literal_eval(str(sys.argv[1]))
-    led_power = ast.literal_eval(str(sys.argv[2]))
-    # convert to list if not already a list
-    if not hasattr(baud_rate, "__len__"):
-        baud_rate = [baud_rate]
-    if not hasattr(led_power, "__len__"):
-        led_power = [led_power]
 
+def main(argv):
+
+    baud_rate_valid = False
+    led_power_valid = False
+
+    # parse the CLI options given
+    use_defaults, baud_rate, led_power, mode, data_string, packet_size, cvref, manual_input = get_cli_args(argv)
+
+    if not manual_input:
+        if use_defaults:
+            baud_rate, led_power, mode, data_string, packet_size, cvref = force_defaults()
+        else:
+            # if variables dont have any value assign the default one
+            baud_rate,led_power,mode,data_string,packet_size,cvref = set_missing_to_default(baud_rate,led_power,mode,data_string,packet_size,cvref)
+        # use for manual input of parameters
+    else:
+        print("This is not yet implemented")
+        sys.exit()
+        # while not baud_rate_valid:
+        #     baud_rate, baud_rate_valid = get_baud_rate()
+        # while not led_power_valid:
+        #     led_power, led_power_valid = get_led_power()
+        # while not mode_valid:
+        #     mode, mode_valid = get_mode()
+        # while not packet_size_valid:
+        #     packet_size, packet_size_valid = get_packet_size()
+        # while not cvref_valid:
+        #     cvref, cvref_valid = get_cvref()
+        # if data_string is None or data_string == "":
+        #     data_string = input("File/String to transmit (empty: '%s'): " % "test001.h5")
+        # if data_string is None or data_string == "":
+        #     data_string = "test001.h5"
+
+    # check values of baudrate and led power
     baud_rate_valid, led_power_valid = assert_settings(baud_rate, led_power)
-    if baud_rate_valid:
-        baud_rate = list(map(int, baud_rate))
-    else:
-        raise ValueError("Input baudrate(s) not valid!")
-    if led_power_valid:
-        led_power = list(map(int, led_power))
-    else:
-        raise ValueError("Input led power(s) not valid!")
+    if not baud_rate_valid:
+        print("Argument of flag '-r' must be a valid integer or a list of integers, e.g. [50000, 100000, 200000, 400000]")
+        sys.exit()
+    if not led_power_valid:
+        print("Argument of flag '-p' must be a valid integer or a list of integers in the range [0,15], e.g. [0, 5, 10, 15]")
+        sys.exit()
 
-while not baud_rate_valid:
-    baud_rate, baud_rate_valid = get_baud_rate()
-while not led_power_valid:
-    led_power, led_power_valid = get_led_power()
+    print(border_count * "=" + "\n > Baudrate(s) set to\t%s" % baud_rate)
+    print(" > LED power(s) set to\t%s" % led_power)
+    print(" > Transmitting %s:\t%s" % (mode, data_string))
+    print(" > Package size set to:\t%i" % packet_size)
+    print(" > CVRef set to:\t%.3f" % cvref)
+    print(border_count * "=")
+    print("Everything set up! Ready for signal transmission!")
+    input("Hit enter to start... ")
 
-if msg is None or msg == "":
-    msg = input("Message to transmit [blank: 'Hello World!']: ")
-if msg == "" or msg is None:
-    msg = "Hello World!"
-
-print(border_count * "=" + "\nBaudrate(s) set to\t%s" % baud_rate)
-print("LED power(s) set to\t%s" % led_power)
-print("Receiving message:\t%s\n" % msg + border_count * "=")
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    # iterate over all baud rates and LED power levels
+    for i, br in enumerate(baud_rate):
+        for j, lp in enumerate(led_power):
 
-def get_accuracy(count, accuracy, accuracy_avg, thread_done):
-    if count <= 0:
-        accuracy_avg = np.mean(accuracy)
-        rt.stop()
-        thread_done.set()
-    read_msg, eol_detected = serial_manager.read_line(_timeout=0.03)
-    acc = difflib.SequenceMatcher(None, read_msg, msg).ratio()
-    if eol_detected:
-        acc = (acc * len(msg) + 1) / (len(msg) + 1)
-    accuracy = np.append(accuracy, acc)
-    accuracy_avg = np.mean(accuracy)
-    print("countdown: %i, accuracy: %f, received msg: %s" % (count, accuracy_avg, read_msg))
-    count -= 1
-    return [count, accuracy, accuracy_avg, thread_done]
+            # init serial connection and set LED power
+            serial_manager = serman.SerialManager()
+            serial_manager.set_port("/dev/serial0")
+            serial_manager.establish_connection(_baudrate=br, _timeout=0.1)
+            set_led_power(lp)
+
+            eof_reached = False
+            success = 0
+            while not eof_reached:  # read until end of file is detected
+                rec_msg, eof = serial_manager.read_line(_timeout=1.0, _crc_length=4)
+                if len(rec_msg) > 4:
+                    if struct.unpack(">I", rec_msg[:4])[0]==crc32(rec_msg[4:]):  # check if sent crc of data matches calculated one
+                        serial_manager.send_msg(b"0x70\r\0\n")  # send confirmation
+
+            serial_manager.close_connection()
+
+    print("Measurements done!")
+    GPIO.output(17, 0)  # turn off LED
 
 
-accuracy_map = np.ones(shape=(2, 2))
-for i, br in enumerate(baud_rate):
-    for j, lp in enumerate(led_power):
-        acc_avg = None
-        serial_manager = serman.SerialManager()
-        serial_manager.set_port("/dev/serial0")
-        serial_manager.establish_connection(_baudrate=br, _timeout=0.03)
-        set_led_power(lp)
-        # ====================================================================
-        count = 0
-        eof_reached = False
-        success = 0
-        while not eof_reached:
-            count += 1
-            print("count: %i" % count)
-            rec_msg, eof = serial_manager.read_line(_timeout=10.0, _crc_length=4)
-            # print("msg: %s" % rec_msg)
-            if len(rec_msg) > 4:
-                crc32_int_sent = struct.unpack(">I", rec_msg[:4])[0]
-                crc32_int_calc = crc32(rec_msg[4:])
-                print("\n" + 80 * "=" + "\n")
-                print("comparing %i and %i" % (crc32_int_sent, crc32_int_calc))
-                if crc32_int_sent == crc32_int_calc:
-                    print("SUUUUUCCCCCEEEEEEEEEEESS")
-                    serial_manager.send_msg(b"0x70\n")
-                else:
-                    print("NOOOOOOO SUCCESSSS")
-
-        # ===================================================================
-        print("Waiting to close connection...")
-        serial_manager.close_connection()
-        print("\n" + 80 * "=" + "\n")
-
-print("Measurements done!")
-np.savetxt("~/project/test.csv", accuracy_map, delimiter=",")
-print("Results saved!")
-GPIO.output(17, 0)
+if __name__ == "__main__":
+    main(sys.argv[1:])

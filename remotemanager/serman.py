@@ -68,15 +68,10 @@ class SerialManager:
             return
         if self.serial_con.is_open:
             try:
-                self.serial_con.flushInput()  # flush input buffer, discarding all its contents
-                self.serial_con.flushOutput()  # flush output buffer, aborting current output
-                # and discard all that is in buffer
-
-                # print("Sending message %s" % _msg)
+                self.serial_con.reset_output_buffer()  # delete contents of input buffer
+                self.serial_con.reset_input_buffer()  # delete contents of output buffer
                 self.serial_con.write(_msg)
-                # print("Message sent!")
-
-                self.serial_con.flush()
+                self.serial_con.flush()  # flush the message in the buffer
             except IOError:
                 print('error communicating...')
         else:
@@ -84,25 +79,11 @@ class SerialManager:
         return
 
     def read_line(self, _eol_character=b'\r\0\n', _timeout=0.05, _crc_length=4):
-        buffer = b""
-        eol_buffer = bytearray("000".encode("ASCII"))
+        buff = b""
         timer = time.time()  # start time of read_line
-        stopwatch = time.time() - timer  # time consumption of this method
-        time_a = time.time()
-        byte_count = 0
-        while stopwatch < _timeout:
-            delta_t = time.time() - time_a  # delta t after updating the "Elapsed time"
-            if delta_t > _timeout:
-                time_a = time.time()
-            one_byte = self.serial_con.read(1)
-            if not one_byte == b'':
-                byte_count += 1
-                eol_buffer.pop(0)
-                eol_buffer += one_byte
-            # print("byte: %s\nbyte count: %i" % (one_byte, byte_count))
-            if eol_buffer == bytearray(_eol_character) and byte_count > _crc_length:
-                return bytearray(buffer[:-2]), True
-            else:
-                buffer += one_byte
-            stopwatch = time.time() - timer
-        return bytearray(buffer), False
+        while time.time()-timer < _timeout:
+            waiting_bytes = self.serial_con.in_waiting
+            buff += self.serial_con.read(waiting_bytes)
+            if _eol_character in buff: #[:-(waiting_bytes+2)]:
+                return bytearray(buff[:-3]), True
+        return bytearray(buff), False
