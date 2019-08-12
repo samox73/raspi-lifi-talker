@@ -1,18 +1,35 @@
 import ast
 import getopt
 import re
+import sys
 import numpy as np
 import RPi.GPIO as GPIO
+import subprocess as sp
+
+from ADCDACPi import *
+
+helpstring = "Usage: python3 pi_sender.py/pi_receiver.py [OPTION]\nTransmitter/Receiver-end of a Li-fi communication \
+system.\nExample: python3 pi_sender.py -m 'custom' -i 'Test string' -r 460800 -p 15 \
+\n\nOptions:\n  \
+-r\tBaud rate (default: 460800)\n  \
+-p\tLED Power (1-15, default: 1)\n  \
+-m\tMode (\"file\", \"custom\", default: \"file\")\n  \
+-i\tFilename/Custom string (e.g. \"test001.h5\" or \"Hello World!\", default: \"test001.h5\")\n  \
+-h\tDisplay this help text end exit\n  \
+-s\tSet the size of the transmitted packages in bytes (default: 1500)\n  \
+-v\tSet reference voltage CVRef (default: 0.4)\n  \
+-d\tForce the use of default values\n\n\
+If a value is needed for the connection but not specified, then the default value will be used."
 
 baud_rates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 border_count = 80  # length of border
 
 # default values
-br_df = [460800]
-lp_df = [1]
+br_df = 460800
+lp_df = 1
 md_df = "file"
 dt_df = "test001.h5"
-ps_df = [1500]
+ps_df = 1500
 cr_df = 0.4
 
 def get_baud_rate():
@@ -84,28 +101,25 @@ def set_led_power(_led_power):
     GPIO.output(22, power[3])
 
 
-def assert_range(numbers, mini, maxi):
-    for index, item in enumerate(numbers):
-        if item < mini:
-            # raise ValueError("Item '%s' at index %s is smaller than %s!" % (item, index, mini))
-            print("Item '%s' at index %s is smaller than %s!" % (item, index, mini))
-            return False
-        if item > maxi:
-            # raise ValueError("Item '%s' at index %s is larger than %s!" % (item, index, maxi))
-            print("Item '%s' at index %s is larger than %s!" % (item, index, maxi))
-            return False
+def assert_range(number, mini, maxi):
+    if number < mini:
+        print("Item '%s' at index %s is smaller than %s!" % (item, index, mini))
+        return False
+    if number > maxi:
+        print("Item '%s' at index %s is larger than %s!" % (item, index, maxi))
+        return False
     return True
 
 
 def assert_settings(br, lp):  # detects if baudrate(s) and led power(s) are valid integers/integer lists
     if assert_valid_integer(br):
-        b_r_valid = assert_range(list(map(int, br)), 9600, 4000000)
+        b_r_valid = assert_range(int(br), 9600, 4000000)
         if b_r_valid:
             print("Baudrates %s are valid!" % br)
     else:
         b_r_valid = False
     if assert_valid_integer(lp):
-        l_p_valid = assert_range(list(map(int, lp)), 0, 15)
+        l_p_valid = assert_range(int(lp), 0, 15)
         if l_p_valid:
             print("LED power levels %s are valid!" % lp)
     else:
@@ -113,11 +127,9 @@ def assert_settings(br, lp):  # detects if baudrate(s) and led power(s) are vali
     return b_r_valid, l_p_valid
 
 
-def assert_valid_integer(numbers):
-    for index, item in enumerate(numbers):
-        if not bool(re.match('^[0-9]+$', str(item))):
-            # raise ValueError("Number %s at %s is not a valid integer!" % (item, index))
-            return False
+def assert_valid_integer(number):
+    if not bool(re.match('^[0-9]+$', str(number))):
+        return False
     return True
 
 def get_cli_args(argv):
@@ -129,7 +141,6 @@ def get_cli_args(argv):
     data = None
     packet_size = None
     cvref = None
-    manual_input = False
 
     try:
         opts, args = getopt.getopt(argv, "hr:p:m:i:s:v:d")
@@ -169,12 +180,10 @@ def get_cli_args(argv):
                 sys.exit()
         elif opt in ["-d"]:  # DEFAULT VALUES
             use_defaults = True
-        elif opt in ["-x"]:  # TO BE DONE
-            manual_input = True
         else:
             print("Unknown flag %s, use -h for help." % opt)
             sys.exit()
-    return use_defaults, baud_rate, led_power, mode, data, packet_size, cvref, manual_input
+    return use_defaults, baud_rate, led_power, mode, data, packet_size, cvref
 
 def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref):
     # if variables dont have any value assign the default one
@@ -194,3 +203,73 @@ def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref)
 
 def force_defaults():
     return br_df, lp_df, md_df, dt_df, ps_df, cr_df
+
+def print_stats(lp, tx_fail, tx_success, packet_size, cvref, br, mode=None, data_string=None, short=False):
+    """
+    prints the statistics of the current transmission
+    lp: led power (int)
+    tx_fail: failed transmissions on the transmitter end (int)
+    tx_success: successful transmissions on the transmitter end (int)
+    packet_size: size of the transmitted package in bytes (int)
+    """
+    tmp = sp.call("clear", shell=True)
+    print(border_count * "=")
+    if not short:
+        sent_bytes = packet_size * tx_success
+        if 0 <= sent_bytes <= 1024:
+            progress = "%.2fB" % sent_bytes
+        elif 1024 < sent_bytes <= 1048576:
+            progress = "%.2fKiB" % (sent_bytes / 1024)
+        elif 1048576 < sent_bytes:
+            progress = "%.2fMiB" % (sent_bytes / 1048576)
+        print(" > Baud rate:\t\t%i" % br)
+        print(" > LED Power:\t\t%i" % lp)
+        if mode is not None and data_string is not None:
+            print(" > Transmitting %s:\t%s" % (mode, data_string))
+        print(" > Package size:\t%s" % packet_size)
+        print(" > CVRef:\t\t%.3f" % cvref)
+    tx_count = tx_fail + tx_success
+    print(" > Failed:\t\t%.3f%% (%i/%i)" % (tx_fail / tx_count * 100, tx_fail, tx_count))
+    print(" > Success:\t\t%.3f%% (%i/%i)" % (tx_success / tx_count * 100, tx_success, tx_count))
+    if not short:
+        print(" > Sent bytes:\t\t%s" % progress)
+    print(border_count * "=")
+
+def init(argv):
+
+    adcdac = ADCDACPi(1)
+    adcdac.set_adc_refvoltage(3.3)
+
+    baud_rate_valid = False
+    led_power_valid = False
+
+    # parse the CLI options given
+    use_defaults, baud_rate, led_power, mode, data_string, packet_size, cvref = get_cli_args(argv)
+
+    if use_defaults:
+        baud_rate, led_power, mode, data_string, packet_size, cvref = force_defaults()
+    else:
+        # if variables dont have any value assign the default one
+        baud_rate,led_power,mode,data_string,packet_size,cvref = set_missing_to_default(baud_rate,led_power,mode,data_string,packet_size,cvref)
+
+    # check values of baudrate and led power
+    baud_rate_valid, led_power_valid = assert_settings(baud_rate, led_power)
+    if not baud_rate_valid:
+        print("Argument of flag '-r' must be a valid integer")
+        sys.exit()
+    if not led_power_valid:
+        print("Argument of flag '-p' must be a valid integer in range [0, 15]")
+        sys.exit()
+
+    # set reference voltage of rectifier
+    adcdac.set_dac_voltage(1, float(cvref))
+
+    print(border_count * "=" + "\n > Baudrate set to\t%s" % baud_rate)
+    print(" > LED power set to\t%s" % led_power)
+    print(" > Transmitting %s:\t%s" % (mode, data_string))
+    print(" > Package size set to:\t%s" % packet_size)
+    print(" > CVRef set to:\t%.3f" % cvref)
+    print(border_count * "=")
+    print("Everything set up! Ready for signal transmission!")
+    input("Hit enter to start... ")
+    return baud_rate, led_power, mode, data_string, packet_size, cvref
