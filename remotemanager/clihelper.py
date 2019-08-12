@@ -12,7 +12,7 @@ br_df = [460800]
 lp_df = [1]
 md_df = "file"
 dt_df = "test001.h5"
-ps_df = 1500
+ps_df = [1500]
 cr_df = 0.4
 
 def get_baud_rate():

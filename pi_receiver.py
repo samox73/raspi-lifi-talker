@@ -1,17 +1,20 @@
 import difflib
-import sys
-import time
-import threading
 import struct
+import sys
+import threading
+import time
+
 import numpy as np
-from zlib import crc32
+import RPi.GPIO as GPIO
+
+from ADCDACPi import ADCDACPi
+from ctypes import *
 from remotemanager import serman
 from remotemanager.reptim import *
 from remotemanager.clihelper import *
 from remotemanager.pachel import *
-from ADCDACPi import ADCDACPi
 from threading import Timer
-import RPi.GPIO as GPIO
+from zlib import crc32
 
 """
 arguments of this script
@@ -103,13 +106,19 @@ def main(argv):
             serial_manager.establish_connection(_baudrate=br, _timeout=0.1)
             set_led_power(lp)
 
+            # initialize C serial connection for writing to serial buffer
+            c_serial_manager = CDLL("./c_libraries/serial_sender.so")
+            c_serial_port = c_serial_manager.set_serial_attributes()
+
             eof_reached = False
             success = 0
             while not eof_reached:  # read until end of file is detected
                 rec_msg, eof = serial_manager.read_line(_timeout=1.0, _crc_length=4)
+                # print(rec_msg)
                 if len(rec_msg) > 4:
                     if struct.unpack(">I", rec_msg[:4])[0]==crc32(rec_msg[4:]):  # check if sent crc of data matches calculated one
-                        serial_manager.send_msg(b"0x70\r\0\n")  # send confirmation
+                        serial_manager.send_msg(b"0x70\r\0\n")  # send confirmation, pySerial
+                        # c_serial_manager.send_msg(c_serial_port, b"0x70\r\0\n", 4)  # send confirmation, own C program
 
             serial_manager.close_connection()
 

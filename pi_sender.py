@@ -9,6 +9,7 @@ import RPi.GPIO as GPIO
 import subprocess as sp
 
 from ADCDACPi import *
+from ctypes import *
 from remotemanager import serman
 from remotemanager.reptim import *
 from remotemanager.clihelper import *
@@ -100,80 +101,92 @@ def main(argv):
     tx_fail = 0
     tx_success = 0
 
+    packet_sizes = np.arange(1000, 2000, 100)
+    overall_timer = np.zeros(shape=(len(baud_rates), len(led_power), len(packet_sizes)))
     # iterate over all baudrates and led powers
-    for br in baud_rate:
-        for lp in led_power:
-            # init serial connection and set LED power
-            serial_manager = serman.SerialManager()
-            serial_manager.set_port("/dev/serial0")
-            serial_manager.establish_connection(_baudrate=br, _timeout=0.05)
-            set_led_power(lp)
+    for i, br in enumerate(baud_rate):
+        for j, lp in enumerate(led_power):
+            for k, packet_size in enumerate(packet_sizes):
+                # init serial connection and set LED power
+                serial_manager = serman.SerialManager()
+                serial_manager.set_port("/dev/serial0")
+                serial_manager.establish_connection(_baudrate=br, _timeout=0.05)
+                set_led_power(lp)
 
-            # transmit data
-            with open(data_string, "rb") as file_tx:
-                eof_reached = False
-                transmission_timer = Timer()  # times the overall transmission time
-                test = AvgTimer()  # times only the writing/sending process and averages over all values, when done
-                while not eof_reached:  # until there is nothing more to read from the file, keep sending
+                # initialize C serial connection for writing to the serial buffer
+                c_serial_manager = CDLL("./c_libraries/serial_sender.so")
+                c_serial_port = c_serial_manager.set_serial_attributes()
 
-                    pkt = bytearray(file_tx.read(packet_size))
-                    # pkt = bytearray("Hello World!".encode("ASCII"))
+                # transmit data
+                with open(data_string, "rb") as file_tx:
+                    packet_size = 1900  # MANUALLLLLLLLLLLLLLLLLLLL INPUT
+                    eof_reached = False
+                    transmission_timer = Timer()  # times the overall transmission time
+                    test = AvgTimer()  # times only the writing/sending process and averages over all values, when done
+                    while not eof_reached:  # until there is nothing more to read from the file, keep sending
 
-                    # if the length of pkt is smaller than the packet size, the end of the file was reached
-                    if len(pkt) < packet_size:
-                        eof_reached = True
-                        print("Time of total transmission:\t\t\t%.2fs" % (transmission_timer.get_value()))
-                        print("Avg time to send a packet of %i bytes:\t%fs" % (packet_size, test.get_avg()))
-                        return
+                        pkt = bytearray(file_tx.read(packet_size))
+                        # pkt = bytearray("Hello World!".encode("ASCII"))
 
-                    # first 4 bytes contain the checksum, the rest is data
-                    pkt = get_packet_of_msg(pkt, packet_size) + bytearray(b'\r\0\n')
+                        # if the length of pkt is smaller than the packet size, the end of the file was reached
+                        if len(pkt) < packet_size:
+                            eof_reached = True
+                            transmission_time = transmission_timer.get_value()
+                            overall_timer[i,j,k] = transmission_time
+                            print("Time of total transmission:\t\t\t%.2fs" % transmission_time)
+                            print("Avg time to send a packet of %i bytes:\t%fs" % (packet_size, test.get_avg()))
+                            break
 
-                    # send message until a valid response is received or the number of tries is reached
-                    send_success = False
-                    number_of_tries = 0
-                    while not send_success and number_of_tries < 500:
-                        test.reset()
-                        serial_manager.send_msg(pkt)
-                        test.add_time()
+                        # first 4 bytes contain the checksum, the rest is data
+                        pkt = bytes(get_packet_of_msg(pkt, packet_size) + bytearray(b'\r\0\n'))
 
-                        # wait for response from receiver. If valid, break out of while loop
-                        timer = Timer()  # measures the time of the read loop
-                        while timer.get_value() < 0.05:  # while loop could eventually be deleted
+                        # send message until a valid response is received or the number of tries is reached
+                        send_success = False
+                        number_of_tries = 0
+                        while not send_success and number_of_tries < 500:
+                            # serial_manager.send_msg(pkt)  # send data with pySerial
+                            c_serial_manager.send_msg(c_serial_port, pkt, len(pkt))  # send data with self-written C functions
+                            test.add_time()
+                            test.reset()
+
+                            # wait for response from receiver. If valid, break out of while loop
+                            timer = Timer()  # measures the time of the read loop
+                            # while timer.get_value() < 0.05:  # while loop could eventually be deleted
                             response, eol_detected = serial_manager.read_line(_timeout=0.05)
                             if response == b"0x70":
                                 send_success = True
                                 tx_success += 1
-                                break
-                        number_of_tries += 1
+                            #    break
+                            number_of_tries += 1
+                            if not send_success:
+                                tx_fail += 1
+
+                            # update the status of the transmission and print it
+                            sent_bytes = packet_size * tx_success
+                            if 0 <= sent_bytes <= 1024:
+                                progress = "%.2fB" % sent_bytes
+                            elif 1024 < sent_bytes <= 1048576:
+                                progress = "%.2fKiB" % (sent_bytes / 1024)
+                            elif 1048576 < sent_bytes:
+                                progress = "%.2fMiB" % (sent_bytes / 1048576)
+                            tmp = sp.call("clear", shell=True)
+                            print(border_count * "=")
+                            print(" > Failed:\t%i" % tx_fail)
+                            print(" > Success:\t%i" % tx_success)
+                            print(" > Sent bytes:\t%s" % progress)
+                            print(border_count * "=")
+
                         if not send_success:
-                            tx_fail += 1
+                            raise TimeoutError("Packet could not be transmitted after 1000 tries.")
 
-                        # update the status of the transmission and print it
-                        sent_bytes = packet_size * tx_success
-                        if 0 <= sent_bytes <= 1024:
-                            progress = "%.2fB" % sent_bytes
-                        elif 1024 < sent_bytes <= 1048576:
-                            progress = "%.2fKiB" % (sent_bytes / 1024)
-                        elif 1048576 < sent_bytes:
-                            progress = "%.2fMiB" % (sent_bytes / 1048576)
-                        tmp = sp.call("clear", shell=True)
-                        print(border_count * "=")
-                        print(" > Failed:\t%i" % tx_fail)
-                        print(" > Success:\t%i" % tx_success)
-                        print(" > Sent bytes:\t%s" % progress)
-                        print(border_count * "=")
-
-                    if not send_success:
-                        raise TimeoutError("Packet could not be transmitted after 1000 tries.")
-
-            # =====================================================================
-            time.sleep(0.1)
-            serial_manager.close_connection()
-            print(border_count * "=")
+                # =====================================================================
+                time.sleep(0.1)
+                serial_manager.close_connection()
+                print(border_count * "=")
 
     print("Measurements done!")
     GPIO.output(17, 0)  # turn off LED
+    print(overall_timer)
 
 
 if __name__ == "__main__":
