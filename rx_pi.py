@@ -42,10 +42,6 @@ def main(argv):
     serial_manager.establish_connection(_baudrate=baud_rate, _timeout=0.1)
     set_led_power(led_power)
 
-    # initialize C serial connection for writing to serial buffer
-    c_serial_manager = CDLL("./c_libraries/serial_sender.so")
-    c_serial_port = c_serial_manager.set_serial_attributes()
-
     # counter for successful/failed transmission of packets
     rx_success = 0
     rx_fail = 0
@@ -75,7 +71,6 @@ def main(argv):
                     rx_success += 1
                 else:
                     rx_fail += 1
-            # elif len(rec_msg) == 12 and bytes(rec_msg) == b'\r\n\r\n':
             if eof_reached:
                 serial_manager.send_msg(b"0x70\r\0\n")  # send confirmation, pySerial
 

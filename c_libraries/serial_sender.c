@@ -8,7 +8,49 @@
 #include <termios.h> // Contains POSIX terminal control definitions
 #include <unistd.h> // write(), read(), close()
 
-int set_serial_attributes()
+
+struct
+{
+  int raw_rate;
+  int termios_rate;
+} conversiontable[] =
+{
+  {0, B0},
+  {50, B50},
+  {75, B75},
+  {110, B110},
+  {134, B134},
+  {150, B150},
+  {200, B200},
+  {300, B300},
+  {600, B600},
+  {1200, B1200},
+  {1800, B1800},
+  {2400, B2400},
+  {4800, B4800},
+  {9600, B9600},
+  {19200, B19200},
+  {38400, B38400},
+  {57600, B57600},
+  {115200, B115200},
+  {230400, B230400},
+  {460800, B460800}
+};
+
+int convert(int rate)
+{
+  for (int i = 0; i < sizeof(conversiontable) / sizeof(conversiontable[0]); i++)
+  {
+    if (conversiontable[i].raw_rate == rate)
+    {
+      return conversiontable[i].termios_rate;
+    }
+  }
+  return -1;    // invalid baud rate
+}
+
+
+int set_serial_attributes(int baud_rate)
 {
 	// Open the serial port. Change device path as needed (currently set to an standard FTDI USB-UART cable type device)
 	int serial_port = open("/dev/serial0", O_RDWR);
@@ -38,15 +80,14 @@ int set_serial_attributes()
 
 	tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
 	tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-	// tty.c_oflag &= ~OXTABS; // Prevent conversion of tabs to spaces (NOT PRESENT ON LINUX)
-	// tty.c_oflag &= ~ONOEOT; // Prevent removal of C-d chars (0x004) in output (NOT PRESENT ON LINUX)
 
 	tty.c_cc[VTIME] = 10;    // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
 	tty.c_cc[VMIN] = 0;
 
-	// Set in/out baud rate to be 9600
-	cfsetispeed(&tty, B460800);
-	cfsetospeed(&tty, B460800);
+	// Set in/out baud rate
+	cfsetispeed(&tty, convert(baud_rate));
+	cfsetospeed(&tty, convert(baud_rate));
+	printf("BAUDRATE SET TO: %d", convert(baud_rate));
 
 	// Save tty settings, also checking for error
 	if (tcsetattr(serial_port, TCSANOW, &tty) != 0) {

@@ -53,7 +53,7 @@ def main(argv):
 
     # initialize C serial connection for writing to the serial buffer
     c_serial_manager = CDLL("./c_libraries/serial_sender.so")
-    c_serial_port = c_serial_manager.set_serial_attributes()
+    c_serial_port = c_serial_manager.set_serial_attributes(baud_rate)
 
 
     # transmit binary data file
@@ -113,7 +113,8 @@ def main(argv):
 
             # send the end of file packet
             eof_packet_sent = False
-            while not eof_packet_sent:
+            timer = Timer()
+            while not eof_packet_sent and timer.get_value() < 2:
                 eof_packet = bytes(get_packet_of_msg(b'\r\n\r\n', packet_number + 1, length=4))
                 c_serial_manager.send_msg(c_serial_port, eof_packet, len(eof_packet))
                 # wait for response from receiver
