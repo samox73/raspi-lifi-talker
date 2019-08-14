@@ -78,12 +78,14 @@ class SerialManager:
             print('cannot open serial port')
         return
 
-    def read_line(self, _eol_character=b'\r\0\n', _timeout=0.05, _crc_length=4):
+    def read_line(self, _eol_character=b'\r\0\n', _eof_character=b'\r\n\r\n', _timeout=0.05, _crc_length=4):
         buff = b""
         timer = time.time()  # start time of read_line
         while time.time()-timer < _timeout:
             waiting_bytes = self.serial_con.in_waiting
             buff += self.serial_con.read(waiting_bytes)
             if _eol_character in buff: #[:-(waiting_bytes+2)]:
-                return bytearray(buff[:-3]), True
+                return bytearray(buff[:-3]), False
+            elif _eof_character in buff:
+                return bytearray(buff[:-4]), True
         return bytearray(buff), False

@@ -8,75 +8,36 @@ import subprocess as sp
 
 from ADCDACPi import *
 
-helpstring = "Usage: python3 pi_sender.py/pi_receiver.py [OPTION]\nTransmitter/Receiver-end of a Li-fi communication \
-system.\nExample: python3 pi_sender.py -m 'custom' -i 'Test string' -r 460800 -p 15 \
+helpstring = "Usage: python3 {rx_pi.py/tx_pi.py} [OPTION]\nTransmitter/Receiver-end of a Li-fi communication \
+system.\nExample: python3 tx_pi.py -m 'custom' -i 'Test string' -r 460800 -p 15 \
+\n         python3 tx_pi.py -m file -i test001.h5 -r 9600 -p 5\
+\n         python3 rx_pi.py --mode=file --input=test.png --baudrate=115200\
 \n\nOptions:\n  \
--r\tBaud rate (default: 460800)\n  \
--p\tLED Power (1-15, default: 1)\n  \
--m\tMode (\"file\", \"custom\", default: \"file\")\n  \
--i\tFilename/Custom string (e.g. \"test001.h5\" or \"Hello World!\", default: \"test001.h5\")\n  \
--h\tDisplay this help text end exit\n  \
--s\tSet the size of the transmitted packages in bytes (default: 1500)\n  \
--v\tSet reference voltage CVRef (default: 0.4)\n  \
--d\tForce the use of default values\n\n\
+-r\t--baudrate\t\tBaud rate (default: 460800)\n  \
+-p\t--ledpower\t\tLED Power (1-15, default: 15)\n  \
+-m\t--mode\t\t\tMode (\"file\", \"custom\", default: \"file\")\n  \
+-i\t--input\t\t\tFilename/Custom string (e.g. \"test001.h5\" or \"Hello, World!\", default: \"test001.h5\")\n  \
+-h\t--help\t\t\tDisplay this help text end exit\n  \
+-s\t--packetsize\t\tSet the size of the transmitted packages in bytes (default: 1500)\n  \
+-c\t--cvref\t\t\tSet reference voltage CVRef (default: 0.35)\n  \
+-n\t\t\t\tWith mode = \"file\": number of tries to send a package, followed by an exception\n\t\t\t\t     mode =\
+ \"custom\": number of times the specified string is transmitted\n\t\t\t\t(default: 500)\n  \
+-v\t--verbose\t\tVerbose, print more stats (use only on tx, can lead to inaccurate measurements on rx side)\n  \
+-d\t--force-defaults\tForce the use of default values\n\n\
 If a value is needed for the connection but not specified, then the default value will be used."
 
 baud_rates = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
-border_count = 80  # length of border
+border_count = 100  # length of border
 
 # default values
 br_df = 460800
-lp_df = 1
+lp_df = 15
 md_df = "file"
 dt_df = "test001.h5"
 ps_df = 1500
-cr_df = 0.4
-
-def get_baud_rate():
-    print("Available baudrates:")
-    for index, item in enumerate(baud_rates):
-        print("\t[%i] %i" % (index + 1, item))
-    print("\t[%i] custom\n" % (len(baud_rates) + 1) + border_count * "=")
-    idx = input("Selection [1-%i] (default: 460800): " % (len(baud_rates) + 1))
-    idx = ast.literal_eval(str(idx))
-    if not hasattr(idx, "__len__"):
-        idx = [idx]
-    _baud_rate = []
-    for index in list(map(str, idx)):
-        if index == str(len(baud_rates) + 1):
-            _baud_rate.append(input("Custom baudrate (default: 2,000,000): "))
-            if _baud_rate[-1] is None or _baud_rate[-1] == "":
-                _baud_rate[-1]
-            if not bool(re.match('^[0-9]+$', _baud_rate[-1])):
-                print("Baud rate not valid!\n" + border_count * "=")
-                _baud_rate = set_baud_rate()[0]
-                return list(map(int, _baud_rate)), True
-        elif index in np.arange(len(baud_rates) + 1).astype(str):
-            _baud_rate.append(baud_rates[int(index) - 1])
-        else:
-            if index is None or index == "":
-                _baud_rate.append(460800)
-            else:
-                print("Baud rate not valid!\n" + border_count * "=")
-                _baud_rate = set_baud_rate()[0]
-                return list(map(int, _baud_rate)), True
-    return list(map(int, _baud_rate)), True
-
-
-def get_led_power():
-    print("Available LED power levels: 0-15")
-    _led_power = input("LED power [0-15]: ")
-    _led_power = ast.literal_eval(str(_led_power))
-    if not hasattr(_led_power, "__len__"):
-        _led_power = [_led_power]
-    for item in list(map(str, _led_power)):
-        if not bool(re.match('^[0-9]+$', item)):
-            print("LED power not valid, enter a value between 0 and 15!\n" + border_count * "=")
-            _led_power = get_led_power()[0]
-        if int(item) not in np.arange(0, 16):
-            print("LED power not valid, enter a value between 0 and 15!\n" + border_count * "=")
-            _led_power = get_led_power()[0]
-    return list(map(int, _led_power)), True
+cr_df = 0.35
+not_df = 500
+vb_df = False
 
 
 def set_led_power(_led_power):
@@ -141,21 +102,24 @@ def get_cli_args(argv):
     data = None
     packet_size = None
     cvref = None
+    number_of_transmissions = None
+    verbose = None
 
     try:
-        opts, args = getopt.getopt(argv, "hr:p:m:i:s:v:d")
+        opts, args = getopt.getopt(argv, "hr:p:m:i:s:c:n:vd", ["help", "baudrate=", "ledpower=", "mode=",
+            "input=", "packetsize=", "cvref=", "verbose", "force-defaults"])
     except getopt.GetoptError:
         print("Wrong use of arguments, see 'pi_sender.py -h' for details")
         sys.exit()
     for opt, arg in opts:
-        if opt == "-h":
+        if opt in ["-h", "--help"]:
             print(helpstring)
             sys.exit()
-        elif opt in ["-r"]:  # BAUD RATE
+        elif opt in ["-r", "--baudrate"]:  # BAUD RATE
             baud_rate = ast.literal_eval(str(arg))
-        elif opt in ["-p"]:  # LED POWER
+        elif opt in ["-p", "--ledpower"]:  # LED POWER
             led_power = ast.literal_eval(str(arg))
-        elif opt in ["-m"]:  # MODE
+        elif opt in ["-m", "--mode"]:  # MODE
             if arg == "custom":
                 mode = "custom"
             elif arg == "file":
@@ -163,29 +127,35 @@ def get_cli_args(argv):
             else:
                 print("Wrong usage of flag '-m', should either be 'custom' or 'file'")
                 sys.exit()
-        elif opt in ["-i"]:  # FILENAME/STRING
+        elif opt in ["-i", "--input"]:  # FILENAME/STRING
             data = str(arg)
-        elif opt in ["-s"]:  # PACKET SIZE
+        elif opt in ["-s", "--packetsize"]:  # PACKET SIZE
             try:
                 packet_size = int(arg)
             except ValueError:
                 print("Argument of flag '-s' must be a valid integer")
-        elif opt in ["-v"]:  # CVREF
+        elif opt in ["-c", "--cvref"]:  # CVREF
             try:
                 cvref = float(arg)
             except ValueError:
                 print("Argument of flag '-v' must be a valid float between 0 and 1")
-            if cvref < 0 or cvref > 1:
+            if cvref < 0 or cvref > 10:
                 print("CVRef must be in [0,1]!")
                 sys.exit()
-        elif opt in ["-d"]:  # DEFAULT VALUES
+        elif opt in ["-n"]:
+            number_of_transmissions = ast.literal_eval(str(arg))
+        elif opt in ["-v", "--verbose"]:
+            verbose = True
+        elif opt in ["-d", "--force-defaults"]:  # DEFAULT VALUES
             use_defaults = True
         else:
             print("Unknown flag %s, use -h for help." % opt)
             sys.exit()
-    return use_defaults, baud_rate, led_power, mode, data, packet_size, cvref
+    return use_defaults, baud_rate, led_power, mode, data, packet_size, cvref, \
+number_of_transmissions, verbose
 
-def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref):
+def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref, n_of_transmissions, \
+        verbose):
     # if variables dont have any value assign the default one
     if baud_rate == "" or baud_rate is None:
         baud_rate = br_df
@@ -199,12 +169,17 @@ def set_missing_to_default(baud_rate, led_power, mode, data, packet_size, cvref)
         packet_size = ps_df
     if cvref is None:
         cvref = cr_df
-    return baud_rate, led_power, mode, data, packet_size, cvref
+    if n_of_transmissions is None:
+        n_of_transmissions = not_df
+    if verbose is None:
+        verbose = vb_df
+    return baud_rate, led_power, mode, data, packet_size, cvref, n_of_transmissions, verbose
 
 def force_defaults():
-    return br_df, lp_df, md_df, dt_df, ps_df, cr_df
+    return br_df, lp_df, md_df, dt_df, ps_df, cr_df, not_df, vb_df
 
-def print_stats(lp, tx_fail, tx_success, packet_size, cvref, br, mode=None, data_string=None, short=False):
+def print_stats(lp, tx_fail, tx_success, packet_size, cvref, br, mode=None, data_string=None, verbose=False, filesize=None, \
+                sent_bytes = None):
     """
     prints the statistics of the current transmission
     lp: led power (int)
@@ -214,8 +189,7 @@ def print_stats(lp, tx_fail, tx_success, packet_size, cvref, br, mode=None, data
     """
     tmp = sp.call("clear", shell=True)
     print(border_count * "=")
-    if not short:
-        sent_bytes = packet_size * tx_success
+    if verbose and sent_bytes is not None:
         if 0 <= sent_bytes <= 1024:
             progress = "%.2fB" % sent_bytes
         elif 1024 < sent_bytes <= 1048576:
@@ -231,11 +205,19 @@ def print_stats(lp, tx_fail, tx_success, packet_size, cvref, br, mode=None, data
     tx_count = tx_fail + tx_success
     print(" > Failed:\t\t%.3f%% (%i/%i)" % (tx_fail / tx_count * 100, tx_fail, tx_count))
     print(" > Success:\t\t%.3f%% (%i/%i)" % (tx_success / tx_count * 100, tx_success, tx_count))
-    if not short:
+    if verbose and sent_bytes is not None:
         print(" > Sent bytes:\t\t%s" % progress)
+        print("\n\n" + 45 * "=" + " Progress " + 45 * "=")
+        percentage = sent_bytes / filesize * 100
+        percentage_int = int(percentage)
+        digit = str(int(10 * (percentage - percentage_int)))
+        if percentage_int == 100:
+            digit = ""
+        print(int(percentage) * "#" + digit + \
+              (99 - percentage_int) * "." + "| %i%%" % percentage_int)
     print(border_count * "=")
 
-def init(argv):
+def init(argv, tx=True):
 
     adcdac = ADCDACPi(1)
     adcdac.set_adc_refvoltage(3.3)
@@ -244,13 +226,16 @@ def init(argv):
     led_power_valid = False
 
     # parse the CLI options given
-    use_defaults, baud_rate, led_power, mode, data_string, packet_size, cvref = get_cli_args(argv)
+    use_defaults, baud_rate, led_power, mode, data_string, packet_size, cvref, number_of_transmissions, \
+verbose = get_cli_args(argv)
 
     if use_defaults:
-        baud_rate, led_power, mode, data_string, packet_size, cvref = force_defaults()
+        baud_rate, led_power, mode, data_string, packet_size, cvref, number_of_transmissions, verbose = force_defaults()
     else:
         # if variables dont have any value assign the default one
-        baud_rate,led_power,mode,data_string,packet_size,cvref = set_missing_to_default(baud_rate,led_power,mode,data_string,packet_size,cvref)
+        baud_rate, led_power, mode, data_string, packet_size,cvref, number_of_transmissions, verbose = \
+        set_missing_to_default(baud_rate, led_power, mode, data_string, packet_size, cvref, \
+                               number_of_transmissions, verbose)
 
     # check values of baudrate and led power
     baud_rate_valid, led_power_valid = assert_settings(baud_rate, led_power)
@@ -266,10 +251,13 @@ def init(argv):
 
     print(border_count * "=" + "\n > Baudrate set to\t%s" % baud_rate)
     print(" > LED power set to\t%s" % led_power)
-    print(" > Transmitting %s:\t%s" % (mode, data_string))
+    if tx:
+        print(" > Transmitting %s:\t%s" % (mode, data_string))
+    else:
+        print(" > Receiving packets")
     print(" > Package size set to:\t%s" % packet_size)
     print(" > CVRef set to:\t%.3f" % cvref)
     print(border_count * "=")
     print("Everything set up! Ready for signal transmission!")
-    input("Hit enter to start... ")
-    return baud_rate, led_power, mode, data_string, packet_size, cvref
+    # input("Hit enter to start... ")
+    return baud_rate, led_power, mode, data_string, packet_size, cvref, number_of_transmissions, verbose
